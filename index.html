@@ -1,0 +1,646 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0,viewport-fit=cover"/>
+<meta name="theme-color" content="#050505"/>
+<meta name="apple-mobile-web-app-capable" content="yes"/>
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent"/>
+<meta name="apple-mobile-web-app-title" content="DDW"/>
+<title>DDW Program</title>
+<style>
+*{box-sizing:border-box;margin:0;padding:0;-webkit-tap-highlight-color:transparent}
+html,body{height:100%;background:#050505;color:#e8e8e8;font-family:'Courier New',monospace;overflow:hidden}
+#app{height:100%;display:flex;flex-direction:column}
+#view{flex:1;overflow-y:auto;-webkit-overflow-scrolling:touch;padding-bottom:20px}
+#nav{flex-shrink:0;display:flex;background:#080808;border-top:1px solid #1a1a1a;padding-bottom:env(safe-area-inset-bottom)}
+.nb{flex:1;border:none;background:transparent;color:#333;padding:10px 2px 8px;cursor:pointer;display:flex;flex-direction:column;align-items:center;gap:2px;border-top:2px solid transparent;transition:all 0.2s;font-family:'Courier New',monospace}
+.nb.on{color:#C0C0C0;border-top-color:#C0C0C0}
+.nb .ni{font-size:17px}
+.nb .nl{font-size:7px;letter-spacing:2px;text-transform:uppercase}
+.card{background:#0f0f0f;border:1px solid #1e1e1e}
+.silver{color:#C0C0C0}
+.green{color:#00E5A0}
+.gold{color:#FFB547}
+.pink{color:#FF6B8A}
+.dim{color:#444}
+.label{font-size:10px;letter-spacing:3px;color:#444;text-transform:uppercase}
+.pb{padding-bottom:20px}
+</style>
+</head>
+<body>
+<div id="app">
+<div id="view"></div>
+<nav id="nav">
+  <button class="nb on" onclick="go('home')" id="nb-home"><span class="ni">💎</span><span class="nl">Home</span></button>
+  <button class="nb" onclick="go('schedule')" id="nb-schedule"><span class="ni">📅</span><span class="nl">Schedule</span></button>
+  <button class="nb" onclick="go('gym')" id="nb-gym"><span class="ni">💪</span><span class="nl">Gym</span></button>
+  <button class="nb" onclick="go('meals')" id="nb-meals"><span class="ni">🍽️</span><span class="nl">Meals</span></button>
+  <button class="nb" onclick="go('sales')" id="nb-sales"><span class="ni">🚀</span><span class="nl">Sales</span></button>
+</nav>
+</div>
+<script>
+// ── STATE ─────────────────────────────────────────────────────
+var S = {page:'home', gymDay:0, mealTab:'breakfast', salesMod:null, salesLesson:null, mealSwap:null};
+
+// ── STORAGE HELPERS ───────────────────────────────────────────
+function todayKey(){ return new Date().toISOString().split('T')[0]; }
+function loadJSON(k,def){ try{ return JSON.parse(localStorage.getItem(k)||'null')||def; }catch(e){ return def; } }
+function saveJSON(k,v){ try{ localStorage.setItem(k,JSON.stringify(v)); }catch(e){} }
+function getCheckins(){ return loadJSON('ddw_c',{}); }
+function getTodayDone(){ return (getCheckins()[todayKey()])||{}; }
+function logCheckin(type){
+  var c=getCheckins(), t=todayKey();
+  if(!c[t]) c[t]={};
+  c[t][type]=true;
+  saveJSON('ddw_c',c);
+  var all=['workout','breakfast','lunch','snack','dinner'].every(function(x){ return c[t][x]; });
+  if(all){
+    var s=loadJSON('ddw_s',{}), y=new Date(); y.setDate(y.getDate()-1);
+    var yk=y.toISOString().split('T')[0];
+    s.count=(s.last===yk)?(s.count||0)+1:1; s.last=t;
+    saveJSON('ddw_s',s);
+  }
+  render();
+}
+function getStreak(){
+  var s=loadJSON('ddw_s',{}), t=todayKey(), y=new Date(); y.setDate(y.getDate()-1);
+  var yk=y.toISOString().split('T')[0];
+  return (s.last===t||s.last===yk)?(s.count||0):0;
+}
+function getWeek(){
+  var c=getCheckins(), wo=0, md=0, fd=0;
+  for(var i=0;i<7;i++){
+    var d=new Date(); d.setDate(d.getDate()-i);
+    var k=d.toISOString().split('T')[0], day=c[k]||{};
+    if(day.workout) wo++;
+    if(day.breakfast||day.lunch||day.snack||day.dinner) md++;
+    if(['workout','breakfast','lunch','snack','dinner'].every(function(t){ return day[t]; })) fd++;
+  }
+  return {wo:wo,md:md,fd:fd};
+}
+function getMindset(){
+  var lines=[
+    "You chose this life. Now prove you deserve it.",
+    "The doors don't care how you feel. Knock anyway.",
+    "Discipline is doing it on the days you don't want to.",
+    "Your future self is watching what you do today.",
+    "Hard days build the reps that easy days can't.",
+    "Don't die wondering what you could have been.",
+    "Nobody remembers excuses. Everyone remembers results.",
+    "One more door. One more rep. That's the standard.",
+    "Pain now. Freedom later. That's the deal.",
+    "You didn't come this far to slow down now.",
+    "Summer is the opportunity. Most reps will waste it.",
+    "Consistency is invisible until suddenly it isn't.",
+    "Be the rep people in the office want to shadow.",
+    "Champions don't have good days. They have good habits.",
+    "DDW — Don't Die Wondering what you were capable of.",
+    "Every door you skip is a deal someone else books.",
+    "Iron sharpens iron. Show up for your team.",
+    "Nobody owes you a good day. Go build one.",
+    "Reps who track their numbers beat reps who guess.",
+    "This is the work. Do it."
+  ];
+  var n=Math.floor((new Date()-new Date(new Date().getFullYear(),0,0))/86400000);
+  return lines[n%lines.length];
+}
+
+// ── GYM DATA ──────────────────────────────────────────────────
+var GYM = [
+  {day:"Monday",focus:"Chest + Triceps",tag:"PUSH",color:"#FF6B35",exercises:[
+    {name:"Barbell Bench Press",sets:"4",reps:"6-8",note:"Primary chest mass builder",link:"https://www.youtube.com/watch?v=vcBig73ojpE"},
+    {name:"Incline DB Press",sets:"3",reps:"8-10",note:"Upper chest emphasis",link:"https://www.youtube.com/watch?v=0G2_XV7slIg"},
+    {name:"Cable Chest Flye",sets:"3",reps:"12-15",note:"Stretch and squeeze",link:"https://www.youtube.com/watch?v=Iwe6AmxVf7o"},
+    {name:"Dips (weighted)",sets:"3",reps:"8-10",note:"Lean forward for chest",link:"https://www.youtube.com/watch?v=yN6Q1UI_xkE"},
+    {name:"Tricep Rope Pushdown",sets:"3",reps:"12-15",note:"Superset with next",link:"https://www.youtube.com/watch?v=vB5OHsJ3EME"},
+    {name:"Overhead Tricep Extension",sets:"3",reps:"10-12",note:"Long head stretch",link:"https://www.youtube.com/watch?v=YbX7Wd8jQ-Q"},
+    {name:"Seated Overhead Tricep Press",sets:"3",reps:"10-12",note:"Full tricep squeeze at top",link:"https://www.youtube.com/watch?v=YbX7Wd8jQ-Q"}
+  ]},
+  {day:"Tuesday",focus:"Back + Biceps",tag:"PULL",color:"#4ECDC4",exercises:[
+    {name:"Barbell Row",sets:"4",reps:"6-8",note:"Overhand grip, drive elbows back",link:"https://www.youtube.com/watch?v=G8l_8chR5BE"},
+    {name:"Pull-Ups / Lat Pulldown",sets:"4",reps:"8-10",note:"Wide grip",link:"https://www.youtube.com/watch?v=eGo4IYlbE5g"},
+    {name:"Seated Cable Row",sets:"3",reps:"10-12",note:"Elbows back, squeeze",link:"https://www.youtube.com/watch?v=GZbfZ033f74"},
+    {name:"Single-Arm DB Row",sets:"3",reps:"10 each",note:"Full range of motion",link:"https://www.youtube.com/watch?v=pYcpY20QaE8"},
+    {name:"Barbell Curl",sets:"3",reps:"8-10",note:"Strict form",link:"https://www.youtube.com/watch?v=kwG2ipFRgfo"},
+    {name:"Hammer Curl",sets:"3",reps:"12 each",note:"Brachialis focus",link:"https://www.youtube.com/watch?v=TwD-YGVP4Bk"}
+  ]},
+  {day:"Wednesday",focus:"Shoulders + Core",tag:"OVERHEAD",color:"#A78BFA",exercises:[
+    {name:"Overhead Press",sets:"4",reps:"6-8",note:"Primary shoulder mass",link:"https://www.youtube.com/watch?v=qEwKCR5JCog"},
+    {name:"Arnold Press",sets:"3",reps:"10-12",note:"Full rotation",link:"https://www.youtube.com/watch?v=6Z15_WdXmVw"},
+    {name:"Lateral Raise",sets:"4",reps:"15-20",note:"Side delt isolation",link:"https://www.youtube.com/watch?v=3VcKaXpzqRo"},
+    {name:"Rear Delt Cable Flye",sets:"3",reps:"15",note:"Posture and rear delt",link:"https://www.youtube.com/watch?v=EA7u4Q_8HQ0"},
+    {name:"Cable Crunch",sets:"3",reps:"15-20",note:"Weighted ab work",link:"https://www.youtube.com/watch?v=AV5PmtB7BSA"},
+    {name:"Hanging Leg Raise",sets:"3",reps:"12-15",note:"Lower core",link:"https://www.youtube.com/watch?v=hdng3Nm1x_E"},
+    {name:"Plank",sets:"3",reps:"45-60s",note:"Brace hard",link:"https://www.youtube.com/watch?v=ASdvN_XEl_c"}
+  ]},
+  {day:"Thursday",focus:"Legs",tag:"LOWER",color:"#F59E0B",exercises:[
+    {name:"Barbell Back Squat",sets:"4",reps:"6-8",note:"Depth past parallel",link:"https://www.youtube.com/watch?v=ultWZbUMPL8"},
+    {name:"Romanian Deadlift",sets:"4",reps:"8-10",note:"Hamstring hinge",link:"https://www.youtube.com/watch?v=JCXUYuzwNrM"},
+    {name:"Leg Press",sets:"3",reps:"10-12",note:"High foot for glutes",link:"https://www.youtube.com/watch?v=IZxyjW7MPJQ"},
+    {name:"Walking Lunges (DB)",sets:"3",reps:"12 each",note:"Good for door knockers",link:"https://www.youtube.com/watch?v=L8fvypPrzzs"},
+    {name:"Leg Curl (machine)",sets:"3",reps:"12-15",note:"Controlled negative",link:"https://www.youtube.com/watch?v=1Tq3QdYUuHs"},
+    {name:"Standing Calf Raise",sets:"4",reps:"15-20",note:"You walk all day, build them",link:"https://www.youtube.com/watch?v=-M4-G8p8fmc"}
+  ]},
+  {day:"Friday",focus:"Back + Chest",tag:"UPPER",color:"#34D399",exercises:[
+    {name:"T-Bar Row",sets:"4",reps:"8-10",note:"Back thickness",link:"https://www.youtube.com/watch?v=j3Igk5nyZE4"},
+    {name:"Chest-Supported DB Row",sets:"3",reps:"10-12",note:"Strict isolation",link:"https://www.youtube.com/watch?v=oFJnUFCMFEo"},
+    {name:"Straight-Arm Pulldown",sets:"3",reps:"15",note:"Lat isolation",link:"https://www.youtube.com/watch?v=XLKUOM6k_LY"},
+    {name:"Pec Deck / Machine Flye",sets:"3",reps:"12-15",note:"No shoulder strain",link:"https://www.youtube.com/watch?v=Z57CtFmRMxA"},
+    {name:"Cable Flye (low to high)",sets:"3",reps:"15",note:"Upper chest",link:"https://www.youtube.com/watch?v=Iwe6AmxVf7o"},
+    {name:"Face Pulls",sets:"3",reps:"15-20",note:"Rotator cuff health",link:"https://www.youtube.com/watch?v=rep-qVOkqgk"}
+  ]},
+  {day:"Saturday",focus:"Arms + Core",tag:"DETAIL",color:"#F472B6",exercises:[
+    {name:"EZ-Bar Curl",sets:"4",reps:"8-10",note:"Wrist-friendly",link:"https://www.youtube.com/watch?v=zG2i9-uJBs0"},
+    {name:"Incline DB Curl",sets:"3",reps:"10-12",note:"Long head stretch",link:"https://www.youtube.com/watch?v=soxrZlIl35U"},
+    {name:"Close-Grip Bench Press",sets:"4",reps:"8-10",note:"Tricep mass",link:"https://www.youtube.com/watch?v=nEF0bv2FW94"},
+    {name:"Skull Crushers",sets:"3",reps:"10-12",note:"EZ-bar",link:"https://www.youtube.com/watch?v=ir5PsbniVSc"},
+    {name:"Concentration Curl",sets:"3",reps:"12 each",note:"Peak contraction",link:"https://www.youtube.com/watch?v=Jvj2wV0vOYU"},
+    {name:"Dead Hang Leg Raise",sets:"3",reps:"12-15",note:"Full hang, controlled raise",link:"https://www.youtube.com/watch?v=hdng3Nm1x_E"},
+    {name:"Russian Twist (weighted)",sets:"3",reps:"20 total",note:"Oblique focus",link:"https://www.youtube.com/watch?v=wkD8rjkodUI"}
+  ]}
+];
+
+// ── SCHEDULE DATA ─────────────────────────────────────────────
+var SCHED = [
+  {time:"8:00 AM",label:"Breakfast at Home",icon:"☀️",note:"High protein. Review your opener out loud. Mental reps before physical reps.",color:"#FFB547",tag:"HOME"},
+  {time:"10:15 AM",label:"Leave for Meeting",icon:"🚗",note:"Mamba U: 2111 Atlanta Ave, Riverside CA. Sales audio on in the car.",color:"#C0C0C0",tag:"DRIVE"},
+  {time:"11:00 AM",label:"Correlation Meeting",icon:"📋",note:"Be early. Take notes. Top reps treat the morning meeting like a prep session.",color:"#00E5A0",tag:"OFFICE"},
+  {time:"12:00 PM",label:"Packed Lunch",icon:"🥗",note:"Eat at the meeting. High protein, nothing heavy before doors.",color:"#FFB547",tag:"OFFICE"},
+  {time:"12:30 PM",label:"Drive to Territory",icon:"🚗",note:"Objection handling on. Pick 2 objections and drill them until automatic.",color:"#C0C0C0",tag:"DRIVE"},
+  {time:"1:00 PM",label:"Doors Open",icon:"🚪",note:"First knock by 1pm. No exceptions. Energy from knock one to knock last.",color:"#FF6B8A",tag:"FIELD"},
+  {time:"1-8:30 PM",label:"Active Knocking",icon:"🔥",note:"Track doors knocked, conversations, sets booked. The rep who tracks improves.",color:"#FF6B8A",tag:"FIELD"},
+  {time:"8:30 PM",label:"Wrap Up",icon:"✅",note:"Log your numbers. What worked today? Name it specifically.",color:"#A78BFA",tag:"FIELD"},
+  {time:"9:00 PM",label:"Dinner and Recovery",icon:"🌙",note:"High protein, quick cook. Turkey, rice, veggies. 12 minutes. Protect your sleep.",color:"#FFB547",tag:"HOME"},
+  {time:"Note",label:"Gym Schedule",icon:"💪",note:"Gym time is individual preference — morning or after doors. Find what works and protect that time.",color:"#00E5A0",tag:"GYM"}
+];
+
+// ── MEALS DATA ────────────────────────────────────────────────
+var MEALS = {
+  breakfast:{name:"Breakfast",time:"8:00 AM - At Home",icon:"☀️",cost:"~$1.40",
+    items:[{f:"Whole eggs (Costco box)",a:"3 large"},{f:"Egg whites (Costco carton)",a:"3 whites"},{f:"Kirkland rolled oats",a:"1 cup dry"},{f:"Banana",a:"1 whole"},{f:"Kirkland peanut butter",a:"1 tbsp"}],
+    p:46,c:74,f:18,cal:690,prep:"Scramble eggs while oats microwave. 6 minutes total."},
+  lunch:{name:"Packed Lunch",time:"12:00 PM - Meeting",icon:"🥗",cost:"~$2.20",
+    items:[{f:"Chicken tenderloins (Costco 6lb)",a:"6 oz cooked"},{f:"White rice (Costco 25lb bag)",a:"1.5 cups cooked"},{f:"Frozen mixed veggies (Costco)",a:"1 cup microwaved"},{f:"Hot sauce",a:"to taste"}],
+    p:56,c:88,f:8,cal:740,prep:"Sunday batch: bake tenderloins 400F 20 min. Cook rice. Portion 6 tupperwares. Week done."},
+  snack:{name:"Pre-Gym Snack",time:"Before Gym",icon:"⚡",cost:"~$0.90",
+    items:[{f:"Whey protein shake (Costco tub)",a:"1.5 scoops"},{f:"Banana",a:"1 whole"}],
+    p:38,c:34,f:4,cal:320,prep:"Shake in shaker bottle, grab a banana. 30 seconds."},
+  dinner:{name:"Dinner",time:"9:00 PM - At Home",icon:"🌙",cost:"~$2.60",
+    items:[{f:"Ground turkey 93% (Costco pack)",a:"6 oz"},{f:"Frozen mixed veggies",a:"1.5 cups"},{f:"White rice (batch cook)",a:"1 cup"},{f:"Garlic, cumin, hot sauce",a:"to taste"}],
+    p:54,c:56,f:16,cal:650,prep:"Brown turkey 8 min. Microwave veggies 3 min. Mix over rice. Done in 12 minutes."}
+};
+
+var SWAPS = {
+  breakfast:[
+    {name:"Turkey Scramble",items:["4 oz ground turkey","3 eggs","1 cup spinach","2 slices Ezekiel bread"],macros:"~620 kcal 52g protein",cost:"$1.80"},
+    {name:"Greek Yogurt Bowl",items:["2 cups Greek yogurt","1 cup oats","1 banana","1 tbsp honey"],macros:"~680 kcal 44g protein",cost:"$1.60"},
+    {name:"Egg White Burrito",items:["6 egg whites + 2 eggs","1 wheat tortilla","1/2 cup black beans","Salsa"],macros:"~650 kcal 50g protein",cost:"$1.50"}
+  ],
+  lunch:[
+    {name:"Turkey Rice Bowl",items:["6 oz ground turkey","1.5 cups brown rice","1 cup broccoli","Soy sauce"],macros:"~720 kcal 54g protein",cost:"$2.10"},
+    {name:"Tuna Grain Bowl",items:["2 cans tuna","1.5 cups quinoa","Mixed greens","Olive oil"],macros:"~700 kcal 60g protein",cost:"$2.00"},
+    {name:"Chicken Burrito Bowl",items:["6 oz chicken","1 cup rice + beans","Salsa + cheese"],macros:"~760 kcal 55g protein",cost:"$2.30"}
+  ],
+  snack:[
+    {name:"Greek Yogurt + Almonds",items:["1 cup Greek yogurt","20g almonds","1 apple"],macros:"~350 kcal 24g protein",cost:"$1.20"},
+    {name:"Hard Boiled Eggs + Rice Cakes",items:["3 hard boiled eggs","3 rice cakes","1 tbsp almond butter"],macros:"~340 kcal 22g protein",cost:"$0.80"},
+    {name:"Protein Bar + Fruit",items:["1 protein bar 20g+","1 banana"],macros:"~330 kcal 22g protein",cost:"$1.50"}
+  ],
+  dinner:[
+    {name:"Chicken Stir Fry",items:["6 oz chicken breast","2 cups stir fry blend","1 cup rice","Soy sauce"],macros:"~670 kcal 52g protein",cost:"$2.40"},
+    {name:"Salmon & Sweet Potato",items:["6 oz salmon","1 large sweet potato","1 cup asparagus"],macros:"~700 kcal 50g protein",cost:"$3.20"},
+    {name:"Tuna Wrap",items:["2 cans tuna","1 wheat tortilla","Avocado + lettuce"],macros:"~580 kcal 56g protein",cost:"$2.00"}
+  ]
+};
+
+var GROCERY = [
+  {cat:"Proteins",icon:"🥩",pw:"~$25-28",items:["Kirkland frozen chicken tenderloins 6lb - $19.49 (÷4=$4.87)","Ground turkey 93% 3lb - ~$12 (÷4=$3)","Eggs 5-dozen box - ~$18 (÷4=$4.50)","Liquid egg whites carton 2-pack - ~$9 (÷4=$2.25)","Kirkland whey protein tub - ~$60 lasts 6+ weeks (÷4=~$10)","Rotisserie chicken $4.99 - quick dinner backup"]},
+  {cat:"Carbs",icon:"🌾",pw:"~$13-16",items:["Kirkland white rice 25lb bag - ~$18 (÷4=$4.50, lasts weeks)","Kirkland rolled oats large canister - ~$10 (÷4=$2.50)","Bananas bunch - ~$2 (buy weekly)","Whole wheat tortillas 2-pack - ~$7 (÷4=$1.75)","Canned black beans 8-pack - ~$9 (÷4=$2.25)"]},
+  {cat:"Vegetables",icon:"🥦",pw:"~$7-9",items:["Kirkland frozen mixed vegetables 5lb - ~$9 (÷4=$2.25)","Kirkland frozen broccoli 4-pack - ~$8 (÷4=$2)","Kirkland frozen stir-fry blend 5lb - ~$9 (÷4=$2.25)","Fresh spinach 1lb bag - ~$4 (÷4=$1)"]},
+  {cat:"Fats and Flavor",icon:"🥜",pw:"~$10-14",items:["Kirkland peanut butter 2-pack - ~$12 (÷4=$3)","Kirkland olive oil 3L jug - ~$18 (÷4=$4.50, lasts months)","Hot sauce / salsa - ~$4 split","Shredded cheese 5lb bag - ~$14 (÷4=$3.50)"]}
+];
+
+// ── SALES DATA ────────────────────────────────────────────────
+var SALES = [
+  {id:1,tag:"VOLUME",title:"More Doors. More Sets. Simple.",color:"#FFB547",time:"15 min",
+   summary:"The fastest way to more sets is not a better pitch. It is more doors. Volume fixes almost every problem a new setter has.",
+   why:"Most setters underperform because they knock too few doors. They overthink, slow down after rejection, take breaks that stretch too long. The rep who knocks 80 doors a day will always beat the rep who knocks 40.",
+   sections:[
+     {title:"The Numbers Game",content:"On average a setter books 1 appointment for every 20-30 doors. That means 20-30 rejections are normal. They are not failures - they are the cost of doing business.\n\nIf your goal is 3 sets today, you need to knock at least 60-90 doors. Do the math before you leave the car and commit to the number."},
+     {title:"The First Door Rule",content:"Whatever mood you are in - knock the first door within 60 seconds of getting out of the car. No warming up. No walking the street first. No checking your phone.\n\nThe first door sets your momentum for the whole day. Reps who delay spend the next hour in their head."},
+     {title:"No Slow Walks",content:"The time between doors is where most setters waste their day. Walk with purpose. Move like you are already late to the next appointment.\n\nYour energy between doors carries into your energy at the door."},
+     {title:"Rejection is a Reset",content:"After a no - take one breath, say nothing to yourself, and walk to the next door. That is the entire reset.\n\nReps who replay rejections are burning mental energy they need for the next door."},
+     {title:"Track Your Doors Daily",content:"At the end of every day write down: doors knocked, conversations, sets booked. Do this for two weeks.\n\nYou will see your exact conversion rate. You will know exactly how many doors you need to hit your goals."}
+   ]},
+  {id:2,tag:"QUALITY",title:"What Makes a Set Actually Stick",color:"#A78BFA",time:"15 min",
+   summary:"A bad set wastes everyone's time. A good set makes the closer's job easy. The difference is simple.",
+   why:"Volume without quality is just burning time. A rep who books 10 weak appointments is less valuable than a rep who books 5 that actually sit and close.",
+   sections:[
+     {title:"Your Only Job at the Door",content:"Your job is not to explain solar. Not to answer every question. Not to sell them.\n\nYour job is one thing: get the appointment.\n\nEvery word you say at the door should move toward booking the sit. If they ask a question you are unsure about say - great question, that is exactly what our specialist will cover when he comes by."},
+     {title:"Get the Bill Amount",content:"Before you book anything, get their electric bill number. This is non-negotiable.\n\nAsk: Just so I can make sure this even makes sense - what are you roughly paying on your electric bill right now?\n\nThat number is the anchor for the closer's entire presentation."},
+     {title:"The Two-Option Close",content:"Never ask 'when works for you' - that opens a door they can walk through with a no.\n\nAlways give two specific options: I have someone in your area Tuesday evening around 6:30 or Wednesday at the same time - which works better for you?\n\nTwo options. They pick one. That is a set."},
+     {title:"Confirm Out Loud",content:"Before you walk away, confirm out loud: So I have you down for Tuesday at 6:30 - is that your address at [address]? Best number to reach you is [number]?\n\nThis 20-second step makes the appointment real in their mind."},
+     {title:"The Quality Checklist",content:"Before you log a set ask yourself:\n1. Are they the homeowner and decision maker?\n2. Do I have their bill amount?\n3. Did they confirm the day and time?\n4. Do I have their contact number?\n\nIf you cannot say yes to all four - it is not a quality set yet."}
+   ]},
+  {id:3,tag:"SUMMER",title:"Hot Bills. Saturated Market. We Win Anyway.",color:"#FF6B35",time:"15 min",
+   summary:"It is summer. Bills are high. Markets are knocked. Here is exactly how you cut through the noise.",
+   why:"Summer is when weak reps complain and strong reps produce. High bills mean high pain. High pain means high motivation.",
+   sections:[
+     {title:"High Bills Are Your Best Friend",content:"In June, July, and August homeowners are opening bills that are double winter. That pain is fresh. That pain is real. That pain is your opener.\n\nLead with it: I am sure you have seen your bill this month - bills in this area have been brutal. That is actually why I am here."},
+     {title:"Saturated Does Not Mean Done",content:"When homeowners say they have already heard this - they are telling you two things: they know solar exists, and they did not say yes to the last rep.\n\nThat means the last rep did not do a good enough job. Your response: Totally - the ones who moved forward are the ones who got to see the specific numbers for their home. That is all I want to set up."},
+     {title:"The Hot Day Advantage",content:"You are knocking in the heat. The homeowner sees you working. That builds credibility.\n\nNever complain about the heat. If anything use it: I have been out here all day because the savings we are putting together for people in this area are real."},
+     {title:"Not Interested in Summer",content:"In summer, not interested almost always means I am busy or I do not want a salesperson.\n\nYour response: I get it - I only need 60 seconds. One question: what are you paying on your bill this month?\n\nGet them talking about their bill. Once they say the number out loud they feel the pain."},
+     {title:"End of Day Mentality",content:"The best sets happen after 7pm when homeowners are home and relaxed. Most reps slow down after 7. You speed up.\n\nThe reps who produce in summer are the ones still moving with full energy at 8pm. That is not motivation - that is discipline."}
+   ]},
+  {id:4,tag:"LEVEL UP",title:"From Setter to Captain in 60 Days",color:"#00E5A0",time:"15 min",
+   summary:"Two months. Fifteen closed deals. That is the path. Reps at RIV have done it.",
+   why:"Too many setters drag their feet. The ones who move fast treat this like a business, not a job.",
+   sections:[
+     {title:"Treat It Like You Own It",content:"The setters who level up fastest do not wait to be told what to do. They show up early. Stay late. Ask questions after the meeting.\n\nThink of every door as a rep of your own business. Your output is your income. Your growth is your responsibility."},
+     {title:"The 15-Deal Math",content:"Setter Captain requires 15 closed deals in 3 months. That is 5 closed deals per month.\n\nAt a standard close rate of 1 in 3 sets, that means 15 quality sets per month - or roughly 4 sets per week.\n\nFour sets per week. Write it down. Everything you do on the doors points at that number."},
+     {title:"Self-Review Every Week",content:"Every Sunday answer:\nHow many doors did I knock?\nHow many conversations did I have?\nHow many sets did I book?\nWhat is my close rate on those sets?\nWhat will I do differently next week?\n\nThis takes 10 minutes. Reps who do this improve faster than any training produces."},
+     {title:"Shadow Someone Ahead of You",content:"There is someone in your office producing more than you. Watch their opener. Watch how they handle the first objection. Watch how they book.\n\nYou will learn more from one hour watching a top setter than from three hours reading about sales."},
+     {title:"Urgency Is a Choice",content:"The rep who moved from Setter to Closer in two months at RIV made a choice every morning to operate with urgency.\n\nThey did not wait for motivation. They moved fast because fast movement produces results and results produce confidence. Start the cycle."}
+   ]},
+  {id:5,tag:"OBJECTIONS",title:"The 5 Doors You Hit Every Day",color:"#FF6B8A",time:"15 min",
+   summary:"Five objections account for 90 percent of everything you hear. Master these five and you will set more than 80 percent of reps in the field.",
+   why:"Setters lose appointments by saying too much. The goal is never to win an argument - it is to get 60 more seconds.",
+   sections:[
+     {title:"1. Not Interested",content:"What they mean: I do not want a salesperson right now.\n\nYour response: Totally - I am not here to sell you anything. One quick question: what are you paying on your electric bill this month?\n\nThen stop talking. Wait for the number. Once they give it you are back in."},
+     {title:"2. I Already Have Solar",content:"What they mean: I am done with this conversation.\n\nYour response: Oh nice - how long have you had it? Are you happy with it?\n\nLet them talk. Most people with solar have questions about battery options or newer incentives. Listen for the opening."},
+     {title:"3. I Am Renting",content:"What they mean: This is not for me.\n\nYour response: Got it - do you know if the homeowner has looked into it? I would love to leave some information for them.\n\nThen move on. Do not try to save the door."},
+     {title:"4. Need to Talk to My Spouse",content:"What they mean: I am not the only decision maker.\n\nYour response: That makes total sense - honestly that is exactly why I want to set up the appointment when you are both home. When works for both of you?\n\nThe spouse is not an obstacle. The spouse is the reason to book a better appointment."},
+     {title:"5. Not Interested in Solar",content:"What they mean: I have made up my mind.\n\nYour response: I hear you - a lot of people said the same before they saw what their specific numbers looked like. I am not asking you to do anything today - just set up 45 minutes so you can see if it even makes sense. If it does not, no hard feelings.\n\nKeep it short. Do not pitch solar. Pitch the appointment."}
+   ]}
+];
+
+// ── NAVIGATION ────────────────────────────────────────────────
+function go(page){
+  S.page=page; S.salesMod=null; S.salesLesson=null; S.mealSwap=null;
+  document.querySelectorAll('.nb').forEach(function(b){ b.classList.remove('on'); });
+  var nb=document.getElementById('nb-'+page);
+  if(nb) nb.classList.add('on');
+  render();
+}
+function render(){
+  var v=document.getElementById('view');
+  v.innerHTML=''; v.scrollTop=0;
+  if(S.page==='home') renderHome(v);
+  else if(S.page==='schedule') renderSchedule(v);
+  else if(S.page==='gym') renderGym(v);
+  else if(S.page==='meals') renderMeals(v);
+  else if(S.page==='sales') renderSales(v);
+}
+
+// ── HOME ──────────────────────────────────────────────────────
+function renderHome(v){
+  var dayNum=new Date().getDay();
+  var dayNames=['Sunday','Monday','Tuesday','Wednesday','Thursday','Friday','Saturday'];
+  var gymToday=dayNum>0?GYM[dayNum-1]:null;
+  var streak=getStreak();
+  var done=getTodayDone();
+  var week=getWeek();
+  var mindset=getMindset();
+  var types=['workout','breakfast','lunch','snack','dinner'];
+  var count=types.filter(function(t){ return done[t]; }).length;
+  var emoji=streak>=14?'🔥':streak>=7?'⚡':streak>=3?'💪':'🌱';
+
+  var html='<div class="pb">';
+
+  // Mindset banner
+  html+='<div style="background:linear-gradient(135deg,#111,#0a0a0a);padding:14px 18px;border-bottom:1px solid #1a1a1a;display:flex;gap:10px;align-items:center">';
+  html+='<div style="font-size:18px">💎</div>';
+  html+='<div style="font-size:12px;color:#C0C0C0;font-style:italic;line-height:1.5">'+mindset+'</div>';
+  html+='</div>';
+
+  // Header
+  html+='<div style="background:#0a0a0a;padding:20px 18px 16px;border-bottom:2px solid #C0C0C0;text-align:center">';
+  html+='<div style="font-size:10px;letter-spacing:6px;color:#444;margin-bottom:6px">DON\'T DIE WONDERING</div>';
+  html+='<div style="font-size:48px;font-weight:900;letter-spacing:-2px;color:#C0C0C0;line-height:1">DDW</div>';
+  html+='<div style="font-size:10px;color:#555;letter-spacing:3px;margin-top:4px">PROGRAM GUIDE · SOLAR DIVISION</div>';
+  html+='</div>';
+
+  // Streak + checklist
+  html+='<div style="margin:12px 16px 0;background:#111;border:1px solid #1e1e1e;border-radius:12px;padding:14px;display:flex;gap:14px;align-items:flex-start">';
+  html+='<div style="text-align:center;flex-shrink:0;min-width:52px">';
+  html+='<div style="font-size:28px">'+emoji+'</div>';
+  html+='<div style="font-size:24px;font-weight:900;color:'+(streak>0?'#C0C0C0':'#444')+';line-height:1;margin-top:2px">'+streak+'</div>';
+  html+='<div style="font-size:7px;color:#444;letter-spacing:1px;margin-top:2px">DAY STREAK</div>';
+  html+='</div>';
+  html+='<div style="flex:1">';
+  html+='<div style="font-size:9px;letter-spacing:2px;color:#555;margin-bottom:8px">TODAY\'S CHECKLIST</div>';
+  html+='<div style="display:grid;grid-template-columns:1fr 1fr;gap:4px">';
+  types.forEach(function(t){
+    var d=done[t];
+    html+='<div onclick="logCheckin(\''+t+'\')" style="display:flex;align-items:center;gap:5px;padding:6px 7px;background:'+(d?'rgba(0,229,160,0.08)':'#0a0a0a')+';border:1px solid '+(d?'rgba(0,229,160,0.25)':'#1a1a1a')+';border-radius:6px;cursor:pointer">';
+    html+='<div style="width:13px;height:13px;border-radius:3px;border:1.5px solid '+(d?'#00E5A0':'#2a2a2a')+';background:'+(d?'#00E5A0':'transparent')+';display:flex;align-items:center;justify-content:center;flex-shrink:0">';
+    if(d) html+='<span style="font-size:8px;color:#000;font-weight:bold">✓</span>';
+    html+='</div>';
+    html+='<span style="font-size:9px;color:'+(d?'#00E5A0':'#555')+';letter-spacing:0.5px;text-transform:uppercase">'+t+'</span>';
+    html+='</div>';
+  });
+  html+='</div>';
+  html+='<div style="margin-top:7px;font-size:9px;color:#444">'+count+'/5 done today'+(count===5?' 🔥 FULL DAY!':'')+'</div>';
+  html+='</div></div>';
+
+  // Week progress
+  html+='<div style="margin:8px 16px 0;background:#0c0c0c;border:1px solid #1a1a1a;border-radius:10px;padding:12px">';
+  html+='<div style="font-size:9px;letter-spacing:3px;color:#444;margin-bottom:10px">THIS WEEK</div>';
+  html+='<div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:6px;text-align:center">';
+  var ws=[{v:week.wo,max:6,l:'WORKOUTS',c:'#00E5A0'},{v:week.md,max:7,l:'MEAL DAYS',c:'#FFB547'},{v:week.fd,max:6,l:'FULL DAYS',c:'#C0C0C0'}];
+  ws.forEach(function(s){
+    html+='<div style="background:#111;border-radius:8px;padding:10px">';
+    html+='<div style="font-size:20px;font-weight:900;color:'+s.c+'">'+s.v+'</div>';
+    html+='<div style="font-size:7px;color:#444;letter-spacing:1px;margin-top:2px">'+s.l+'</div>';
+    html+='<div style="margin-top:5px;height:3px;background:#1a1a1a;border-radius:2px"><div style="height:100%;width:'+Math.min(s.v/s.max*100,100)+'%;background:'+s.c+';border-radius:2px"></div></div>';
+    html+='</div>';
+  });
+  html+='</div></div>';
+
+  // Today gym
+  html+='<div style="margin:8px 16px 0">';
+  if(dayNum===0){
+    html+='<div style="background:#0c0c0c;border:1px dashed #1e1e1e;border-radius:10px;padding:12px;display:flex;align-items:center;gap:10px"><span style="font-size:20px">😴</span><div><div style="font-size:11px;font-weight:bold;color:#444">SUNDAY — REST DAY</div><div style="font-size:10px;color:#333;margin-top:2px">Active recovery, meal prep, mental reset</div></div></div>';
+  } else {
+    html+='<div onclick="go(\'gym\')" style="background:#111;border:1px solid #1e1e1e;border-top:3px solid '+gymToday.color+';border-radius:10px;padding:12px;cursor:pointer;display:flex;justify-content:space-between;align-items:center">';
+    html+='<div><div style="font-size:9px;color:#444;letter-spacing:2px;margin-bottom:3px">TODAY · '+dayNames[dayNum].toUpperCase()+'</div>';
+    html+='<div style="font-size:14px;font-weight:bold">'+gymToday.focus+'</div>';
+    html+='<div style="font-size:10px;color:#666;margin-top:2px">'+gymToday.exercises.length+' exercises · tap to view</div></div>';
+    html+='<div style="font-size:22px;color:'+gymToday.color+'">›</div></div>';
+  }
+  html+='</div>';
+
+  // Nav grid
+  html+='<div style="margin:8px 16px 0;display:grid;grid-template-columns:1fr 1fr;gap:8px">';
+  [{icon:'📅',label:'Schedule',id:'schedule',c:'#C0C0C0'},{icon:'💪',label:'Gym',id:'gym',c:'#00E5A0'},{icon:'🍽️',label:'Meals',id:'meals',c:'#FFB547'},{icon:'🚀',label:'Sales',id:'sales',c:'#FF6B8A'}].forEach(function(n){
+    html+='<div onclick="go(\''+n.id+'\')" style="background:#0c0c0c;border:1px solid #1a1a1a;border-top:2px solid '+n.c+';border-radius:10px;padding:14px;cursor:pointer;text-align:center">';
+    html+='<div style="font-size:22px;margin-bottom:5px">'+n.icon+'</div>';
+    html+='<div style="font-size:11px;font-weight:bold;letter-spacing:1px;color:#777">'+n.label+'</div>';
+    html+='</div>';
+  });
+  html+='</div>';
+
+  html+='</div>';
+  v.innerHTML=html;
+}
+
+// ── SCHEDULE ──────────────────────────────────────────────────
+function renderSchedule(v){
+  var html='<div class="pb">';
+  html+='<div style="background:#0a0a0a;padding:22px 18px 14px;border-bottom:2px solid #C0C0C0">';
+  html+='<div style="font-size:10px;letter-spacing:4px;color:#444;margin-bottom:4px">MON-SAT DAILY PLAN</div>';
+  html+='<div style="font-size:22px;font-weight:bold">Daily Schedule</div>';
+  html+='<div style="font-size:11px;color:#555;margin-top:3px">Metro at Main → Riverside → Doors → Home</div>';
+  html+='</div>';
+  html+='<div style="padding:14px 16px;position:relative">';
+  html+='<div style="position:absolute;left:28px;top:28px;bottom:28px;width:1px;background:#1a1a1a"></div>';
+  SCHED.forEach(function(s){
+    var tc={HOME:'#FFB547',DRIVE:'#C0C0C0',OFFICE:'#00E5A0',FIELD:'#FF6B8A',GYM:'#A78BFA'};
+    var c=tc[s.tag]||'#C0C0C0';
+    html+='<div style="display:flex;gap:10px;margin-bottom:10px;align-items:flex-start">';
+    html+='<div style="width:28px;height:28px;border-radius:50%;background:#111;border:2px solid '+c+';display:flex;align-items:center;justify-content:center;font-size:12px;flex-shrink:0;z-index:1">'+s.icon+'</div>';
+    html+='<div style="background:#0f0f0f;border:1px solid #1a1a1a;border-left:3px solid '+c+';padding:9px 12px;flex:1;border-radius:0 6px 6px 0">';
+    html+='<div style="display:flex;justify-content:space-between;margin-bottom:2px">';
+    html+='<div style="font-size:12px;font-weight:bold">'+s.label+'</div>';
+    html+='<div style="font-size:10px;color:'+c+'">'+s.time+'</div>';
+    html+='</div>';
+    html+='<div style="font-size:10px;color:#555">'+s.note+'</div>';
+    html+='</div></div>';
+  });
+  html+='<div style="background:#0a0a0a;border:1px dashed #1e1e1e;border-radius:8px;padding:12px;display:flex;align-items:center;gap:10px">';
+  html+='<span style="font-size:18px">😴</span><div><div style="font-size:11px;font-weight:bold;color:#444">SUNDAY — FULL REST</div><div style="font-size:10px;color:#333;margin-top:1px">Recovery, meal prep, mental reset.</div></div>';
+  html+='</div></div></div>';
+  v.innerHTML=html;
+}
+
+// ── GYM ───────────────────────────────────────────────────────
+function renderGym(v){
+  var gd=GYM[S.gymDay];
+  var html='<div class="pb">';
+  html+='<div style="background:#0a0a0a;padding:20px 18px 14px;border-bottom:2px solid '+gd.color+'">';
+  html+='<div style="font-size:10px;letter-spacing:4px;color:#444;margin-bottom:4px">EOS FITNESS · 6-DAY SPLIT</div>';
+  html+='<div style="font-size:22px;font-weight:bold">Gym Program</div>';
+  html+='</div>';
+
+  // Day tabs
+  html+='<div style="display:flex;overflow-x:auto;background:#0a0a0a;border-bottom:1px solid #1a1a1a;padding:0 14px;scrollbar-width:none">';
+  GYM.forEach(function(d,i){
+    html+='<button onclick="S.gymDay='+i+';renderGym(document.getElementById(\'view\'))" style="flex:0 0 auto;padding:11px 12px;border:none;background:transparent;border-bottom:3px solid '+(i===S.gymDay?d.color:'transparent')+';color:'+(i===S.gymDay?d.color:'#444')+';cursor:pointer;font-family:\'Courier New\',monospace;font-size:10px;font-weight:bold;letter-spacing:1px;white-space:nowrap">'+d.day.slice(0,3).toUpperCase()+'</button>';
+  });
+  html+='</div>';
+
+  // Day header
+  html+='<div style="padding:14px 18px 10px;background:#0a0a0a;border-bottom:1px solid #1a1a1a;display:flex;justify-content:space-between;align-items:center">';
+  html+='<div>';
+  html+='<div style="display:inline-block;background:'+gd.color+';color:#000;font-size:9px;font-weight:bold;letter-spacing:3px;padding:2px 8px;margin-bottom:6px">'+gd.tag+'</div>';
+  html+='<div style="font-size:18px;font-weight:bold">'+gd.day+'</div>';
+  html+='<div style="font-size:12px;color:#888;margin-top:1px">'+gd.focus+'</div>';
+  html+='</div>';
+  html+='<div style="text-align:right">';
+  html+='<div style="font-size:26px;font-weight:bold;color:'+gd.color+'">'+gd.exercises.length+'</div>';
+  html+='<div style="font-size:9px;color:#444;letter-spacing:1px">EXERCISES</div>';
+  html+='</div></div>';
+
+  // Exercises
+  html+='<div style="padding:10px 16px">';
+  gd.exercises.forEach(function(ex){
+    html+='<div style="background:#0f0f0f;border:1px solid #1a1a1a;border-left:3px solid '+gd.color+';padding:11px 13px;margin-bottom:7px;display:flex;justify-content:space-between;align-items:flex-start">';
+    html+='<div style="flex:1">';
+    html+='<div style="font-size:13px;font-weight:bold;margin-bottom:2px">'+ex.name+'</div>';
+    html+='<div style="font-size:10px;color:#444">'+ex.note+'</div>';
+    html+='<a href="'+ex.link+'" target="_blank" style="display:inline-flex;align-items:center;gap:3px;margin-top:5px;background:rgba(255,255,255,0.04);border:1px solid #2a2a2a;border-radius:4px;padding:3px 8px;font-size:9px;color:#888;text-decoration:none;letter-spacing:1px">▶ FORM GUIDE</a>';
+    html+='</div>';
+    html+='<div style="text-align:right;flex-shrink:0;padding-left:8px">';
+    html+='<div style="font-size:13px;color:'+gd.color+';font-weight:bold">'+ex.sets+' × '+ex.reps+'</div>';
+    html+='<div style="font-size:9px;color:#333;margin-top:1px">SETS × REPS</div>';
+    html+='</div></div>';
+  });
+  html+='<div style="background:#0f0f0f;border:1px solid #1a1a1a;padding:11px 13px;font-size:10px;color:#555;line-height:1.6;margin-top:4px">';
+  html+='Add weight or reps every week. You are burning 400-600 kcal on doors - eat that pre-gym snack. Sunday is full rest.';
+  html+='</div></div></div>';
+  v.innerHTML=html;
+}
+
+// ── MEALS ─────────────────────────────────────────────────────
+function renderMeals(v){
+  var tabs=['breakfast','lunch','snack','dinner'];
+  var m=MEALS[S.mealTab];
+  var done=getTodayDone();
+  var swaps=SWAPS[S.mealTab]||[];
+  var showSwap=S.mealSwap===S.mealTab;
+
+  var html='<div class="pb">';
+  html+='<div style="background:#0a0a0a;padding:20px 18px 14px;border-bottom:2px solid #FFB547">';
+  html+='<div style="font-size:10px;letter-spacing:4px;color:#444;margin-bottom:4px">COSTCO BULK · 4 GUYS SPLIT · ~$90/WEEK</div>';
+  html+='<div style="font-size:22px;font-weight:bold">Meal Plan</div>';
+  html+='<div style="font-size:11px;color:#555;margin-top:3px">High protein · No cooking skill needed</div>';
+  html+='</div>';
+
+  // Tabs
+  html+='<div style="display:flex;background:#0a0a0a;border-bottom:1px solid #1a1a1a">';
+  tabs.forEach(function(t){
+    html+='<button onclick="S.mealTab=\''+t+'\';S.mealSwap=null;renderMeals(document.getElementById(\'view\'))" style="flex:1;padding:11px 4px;border:none;background:transparent;border-bottom:3px solid '+(t===S.mealTab?'#FFB547':'transparent')+';color:'+(t===S.mealTab?'#e8e8e8':'#444')+';font-family:\'Courier New\',monospace;font-size:9px;letter-spacing:1px;text-transform:uppercase;cursor:pointer">'+t+'</button>';
+  });
+  html+='</div>';
+
+  // Meal card
+  html+='<div style="padding:14px 16px">';
+  html+='<div style="background:#0f0f0f;border:1px solid #1a1a1a;border-left:3px solid #FFB547">';
+  html+='<div style="padding:13px 14px 10px;border-bottom:1px solid #1a1a1a;display:flex;justify-content:space-between;align-items:flex-start">';
+  html+='<div>';
+  html+='<div style="font-size:14px;font-weight:bold;margin-bottom:2px">'+m.icon+' '+m.name+'</div>';
+  html+='<div style="font-size:10px;color:#444">'+m.time+'</div>';
+  html+='<div style="font-size:10px;color:#00E5A0;margin-top:2px">Cost: '+m.cost+'</div>';
+  html+='</div>';
+  html+='<div style="text-align:right"><div style="font-size:18px;font-weight:bold;color:#FFB547">'+m.cal+'</div><div style="font-size:9px;color:#444">KCAL</div></div>';
+  html+='</div>';
+  html+='<div style="padding:11px 14px">';
+  m.items.forEach(function(item,j){
+    html+='<div style="display:flex;justify-content:space-between;padding:4px 0;border-bottom:'+(j<m.items.length-1?'1px solid #141414':'none')+'">';
+    html+='<span style="font-size:12px;color:#ccc">'+item.f+'</span>';
+    html+='<span style="font-size:11px;color:#666">'+item.a+'</span>';
+    html+='</div>';
+  });
+  html+='<div style="display:flex;gap:14px;margin-top:10px;padding-top:8px;border-top:1px solid #1a1a1a">';
+  html+='<div style="font-size:11px"><span style="color:#444">P </span><span style="color:#00E5A0">'+m.p+'g</span></div>';
+  html+='<div style="font-size:11px"><span style="color:#444">C </span><span style="color:#FFB547">'+m.c+'g</span></div>';
+  html+='<div style="font-size:11px"><span style="color:#444">F </span><span style="color:#FF6B8A">'+m.f+'g</span></div>';
+  html+='</div>';
+  html+='<div style="margin-top:10px;background:#0a0a0a;padding:9px;font-size:10px;color:#666;line-height:1.6">'+m.prep+'</div>';
+
+  // Log + Swap buttons
+  var logged=done[S.mealTab];
+  html+='<div style="display:flex;gap:8px;margin-top:10px">';
+  html+='<div onclick="logCheckin(\''+S.mealTab+'\')" style="flex:1;padding:9px;background:'+(logged?'rgba(0,229,160,0.12)':'#111')+';border:1px solid '+(logged?'rgba(0,229,160,0.35)':'#1e1e1e')+';border-radius:7px;text-align:center;cursor:pointer">';
+  html+='<div style="font-size:11px;font-weight:bold;color:'+(logged?'#00E5A0':'#555')+'">'+(logged?'✓ LOGGED':'LOG MEAL')+'</div>';
+  html+='</div>';
+  html+='<div onclick="S.mealSwap=(S.mealSwap===\''+S.mealTab+'\'?null:\''+S.mealTab+'\');renderMeals(document.getElementById(\'view\'))" style="flex:1;padding:9px;background:#111;border:1px solid #1e1e1e;border-radius:7px;text-align:center;cursor:pointer">';
+  html+='<div style="font-size:11px;font-weight:bold;color:#888">SWAP MEAL</div>';
+  html+='</div></div>';
+
+  // Swap panel
+  if(showSwap){
+    html+='<div style="margin-top:10px">';
+    html+='<div style="font-size:9px;letter-spacing:2px;color:#444;margin-bottom:7px">SWAP OPTIONS — SAME MACROS</div>';
+    swaps.forEach(function(sw){
+      html+='<div style="background:#0a0a0a;border:1px solid #1a1a1a;border-radius:7px;padding:10px;margin-bottom:6px">';
+      html+='<div style="font-size:12px;font-weight:bold;margin-bottom:4px;color:#ccc">'+sw.name+'</div>';
+      sw.items.forEach(function(it){ html+='<div style="font-size:10px;color:#555;padding:1px 0">· '+it+'</div>'; });
+      html+='<div style="display:flex;justify-content:space-between;margin-top:6px">';
+      html+='<div style="font-size:10px;color:#00E5A0">'+sw.macros+'</div>';
+      html+='<div style="font-size:10px;color:#666">'+sw.cost+'</div>';
+      html+='</div></div>';
+    });
+    html+='</div>';
+  }
+
+  html+='</div></div>';
+
+  // Costco tip
+  html+='<div style="margin-top:10px;background:#0a0a0a;border:1px solid #1a1a1a;border-left:3px solid #00E5A0;padding:11px 13px;font-size:11px;color:#555;line-height:1.7">';
+  html+='4 guys = 4x buying power. One person pays at Costco, others Venmo. Rotate weekly. Total per person: <span style="color:#00E5A0">~$85-95/week</span>.';
+  html+='</div>';
+
+  // Grocery list
+  html+='<div style="margin-top:12px">';
+  html+='<div style="font-size:9px;letter-spacing:3px;color:#444;margin-bottom:10px">COSTCO SHOPPING LIST</div>';
+  GROCERY.forEach(function(g){
+    html+='<div style="background:#0f0f0f;border:1px solid #1a1a1a;padding:12px 13px;margin-bottom:8px">';
+    html+='<div style="display:flex;justify-content:space-between;margin-bottom:8px">';
+    html+='<div style="font-size:11px;font-weight:bold">'+g.icon+' '+g.cat+'</div>';
+    html+='<div style="font-size:10px;color:#00E5A0">'+g.pw+'/person</div>';
+    html+='</div>';
+    g.items.forEach(function(it){ html+='<div style="background:#0a0a0a;border:1px solid #1a1a1a;padding:5px 9px;font-size:10px;color:#888;margin-bottom:3px">'+it+'</div>'; });
+    html+='</div>';
+  });
+  html+='</div></div></div>';
+  v.innerHTML=html;
+}
+
+// ── SALES ─────────────────────────────────────────────────────
+function renderSales(v){
+  if(S.salesLesson!==null && S.salesMod!==null){ renderLesson(v); return; }
+  if(S.salesMod!==null){ renderMod(v); return; }
+
+  var html='<div class="pb">';
+  html+='<div style="background:#0a0a0a;padding:20px 18px 14px;border-bottom:2px solid #FF6B8A">';
+  html+='<div style="font-size:10px;letter-spacing:4px;color:#444;margin-bottom:4px">SETTER FOCUSED · KEEP IT SIMPLE</div>';
+  html+='<div style="font-size:22px;font-weight:bold">Sales Training</div>';
+  html+='<div style="font-size:11px;color:#555;margin-top:3px">5 modules built for setters in the California summer market</div>';
+  html+='</div>';
+  html+='<div style="padding:14px 16px">';
+  html+='<div style="background:#0f0f0f;border:1px solid #1a1a1a;border-left:3px solid #7C3AED;padding:12px 13px;margin-bottom:14px;font-size:11px;color:#666;line-height:1.7">These modules are built for one thing: more sets, better quality, faster leveling up. Read each one, close the app, and apply it. Simple beats complex every time on the doors.</div>';
+  SALES.forEach(function(mod,i){
+    html+='<div onclick="S.salesMod='+i+';render()" style="background:#0f0f0f;border:1px solid #1a1a1a;border-left:3px solid '+mod.color+';padding:13px;margin-bottom:9px;cursor:pointer">';
+    html+='<div style="display:flex;justify-content:space-between;align-items:flex-start;margin-bottom:8px">';
+    html+='<div>';
+    html+='<div style="display:inline-block;background:'+mod.color+';color:#000;font-size:8px;font-weight:bold;letter-spacing:2px;padding:2px 7px;margin-bottom:5px">'+mod.tag+'</div>';
+    html+='<div style="font-size:14px;font-weight:bold">Module '+mod.id+': '+mod.title+'</div>';
+    html+='</div>';
+    html+='<div style="color:'+mod.color+';font-size:18px">›</div>';
+    html+='</div>';
+    html+='<div style="font-size:11px;color:#666;margin-bottom:7px;line-height:1.6">'+mod.summary+'</div>';
+    html+='<div style="font-size:10px;color:#444">⏱ '+mod.time+'</div>';
+    html+='</div>';
+  });
+  html+='</div></div>';
+  v.innerHTML=html;
+}
+
+function renderMod(v){
+  var mod=SALES[S.salesMod];
+  var html='<div class="pb">';
+  html+='<div style="background:#0a0a0a;padding:20px 18px 14px;border-bottom:2px solid '+mod.color+'">';
+  html+='<button onclick="S.salesMod=null;render()" style="background:none;border:none;color:#7C3AED;font-family:\'Courier New\',monospace;font-size:11px;cursor:pointer;padding:0;margin-bottom:10px;display:block">← ALL MODULES</button>';
+  html+='<div style="display:inline-block;background:'+mod.color+';color:#000;font-size:8px;font-weight:bold;letter-spacing:2px;padding:2px 7px;margin-bottom:6px">'+mod.tag+'</div>';
+  html+='<div style="font-size:20px;font-weight:bold;margin-bottom:4px">Module '+mod.id+': '+mod.title+'</div>';
+  html+='<div style="font-size:10px;color:#555">⏱ '+mod.time+'</div>';
+  html+='</div>';
+  html+='<div style="padding:14px 16px">';
+  html+='<div style="background:#0f0f0f;border:1px solid #1a1a1a;border-left:3px solid '+mod.color+';padding:13px;margin-bottom:8px;font-size:12px;color:#aaa;line-height:1.7">'+mod.summary+'</div>';
+  html+='<div style="background:#080808;border:1px solid #141414;padding:12px 13px;margin-bottom:14px;font-size:11px;color:#666;line-height:1.7"><span style="color:#444">Why it matters: </span>'+mod.why+'</div>';
+  html+='<div style="font-size:9px;letter-spacing:3px;color:#444;margin-bottom:10px">SECTIONS — TAP TO EXPAND</div>';
+  mod.sections.forEach(function(sec,i){
+    html+='<div onclick="S.salesLesson='+i+';render()" style="background:#0f0f0f;border:1px solid #1a1a1a;border-left:3px solid '+mod.color+';padding:13px;margin-bottom:7px;cursor:pointer;display:flex;justify-content:space-between;align-items:center">';
+    html+='<div style="font-size:13px;font-weight:bold">'+sec.title+'</div>';
+    html+='<div style="color:'+mod.color+';font-size:18px">›</div>';
+    html+='</div>';
+  });
+  html+='</div></div>';
+  v.innerHTML=html;
+}
+
+function renderLesson(v){
+  var mod=SALES[S.salesMod];
+  var sec=mod.sections[S.salesLesson];
+  var html='<div class="pb">';
+  html+='<div style="background:#0a0a0a;padding:20px 18px 14px;border-bottom:2px solid '+mod.color+'">';
+  html+='<button onclick="S.salesLesson=null;render()" style="background:none;border:none;color:#7C3AED;font-family:\'Courier New\',monospace;font-size:11px;cursor:pointer;padding:0;margin-bottom:10px;display:block">← '+mod.title+'</button>';
+  html+='<div style="font-size:18px;font-weight:bold">'+sec.title+'</div>';
+  html+='</div>';
+  html+='<div style="padding:14px 16px">';
+  html+='<div style="background:#0f0f0f;border:1px solid #1a1a1a;border-left:3px solid '+mod.color+';padding:16px;font-size:13px;color:#ccc;line-height:1.85">'+sec.content.replace(/\n/g,'<br><br>')+'</div>';
+  html+='<div style="margin-top:14px;background:#080808;border:1px solid #141414;padding:12px 13px;font-size:10px;color:#555;line-height:1.7">Read this, close the app, and apply it on the doors. Simple execution beats perfect knowledge every time.</div>';
+  html+='</div></div>';
+  v.innerHTML=html;
+}
+
+// ── iOS INSTALL HINT ──────────────────────────────────────────
+window.addEventListener('load', function(){
+  var isIOS=/iphone|ipad|ipod/i.test(navigator.userAgent);
+  if(isIOS && !navigator.standalone){
+    setTimeout(function(){
+      var b=document.createElement('div');
+      b.style.cssText='position:fixed;bottom:80px;left:16px;right:16px;background:#0f0f0f;border:1px solid #C0C0C0;border-radius:10px;padding:12px 14px;font-size:11px;color:#999;z-index:999;line-height:1.6;font-family:Courier New,monospace';
+      b.innerHTML='📲 <strong style="color:#e8e8e8">Install DDW:</strong> Tap Share then "Add to Home Screen" <button onclick="this.parentNode.remove()" style="float:right;background:none;border:none;color:#555;cursor:pointer;font-size:14px;padding:0">✕</button>';
+      document.body.appendChild(b);
+      setTimeout(function(){ if(b.parentNode) b.remove(); },8000);
+    },2000);
+  }
+});
+
+render();
+</script>
+</body>
+</html>
